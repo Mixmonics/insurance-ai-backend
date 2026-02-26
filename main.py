@@ -1,13 +1,28 @@
+# main.py
+import os
+import json
+import re
 from fastapi import FastAPI
 from pydantic import BaseModel
 from openai import OpenAI
-import os
-import json
+from dotenv import load_dotenv
 
-app = FastAPI()
+# Load .env if exists
+if os.path.exists(".env"):
+    load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# OpenAI API key
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY is not set!")
 
+# Initialize OpenAI client
+client = OpenAI(api_key=api_key)
+
+# FastAPI app
+app = FastAPI(title="Insurance AI Backend")
+
+# Lead model
 class Lead(BaseModel):
     name: str
     email: str
@@ -15,39 +30,39 @@ class Lead(BaseModel):
     message: str
 
 @app.get("/")
-def health():
-    return {"status": "running"}
+def root():
+    return {"status": "AI backend is live!"}
 
 @app.post("/lead")
 def process_lead(lead: Lead):
-
-    prompt = f"""
-You are an AI assistant for an independent insurance agency.
-
-Analyze this inbound lead.
-
-Extract:
-- insurance_type (auto, home, commercial, other)
-- intent_score (1-5)
-- missing_fields (list)
-- short_summary
-- professional_email_response
-
-Lead message:
-{lead.message}
-
-Return strictly valid JSON.
-"""
-
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
+        messages=[
+            {"role": "system", "content": "Extract structured insurance lead info."},
+            {
+                "role": "user",
+                "content": f"""
+Name: {lead.name}
+Email: {lead.email}
+Phone: {lead.phone}
+Message: {lead.message}
+
+Return ONLY valid JSON with:
+name, email, phone, type_of_insurance, urgency
+"""
+            }
+        ],
+        temperature=0
     )
 
-    try:
-        parsed = json.loads(response.choices[0].message.content)
-    except:
-        parsed = {"raw_output": response.choices[0].message.content}
+    raw_output = response.choices[0].message.content
 
-    return parsed
+    # Remove markdown formatting if present
+    cleaned = re.sub(r"```json|```", "", raw_output).strip()
+
+    return json.loads(cleaned)
+
+# Run directly via python main.py
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=True)
